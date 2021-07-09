@@ -6,12 +6,16 @@ import lxml
 import requests
 import QuantLib as ql
 
+
+def ql_to_datetime(d):
+    return datetime(d.year(), d.month(), d.dayOfMonth())
+
 class Curve:
     def __init__(self, currency="USD", type="OIS", *args):
         self.currency = currency    #Currency of underlying rate.; E.g. USD, GBP, EUR
         self.type = type            #Type of curve: E.g. OIS (Discount) or LIBOR (Forecast)
         self.holiday = ql.TARGET()
-        self.t0 = date.today() + timedelta(days=90)
+        self.t0 = date.today()
         self.today = ql.Date(self.t0.day, self.t0.month, self.t0.year)
         ql.Settings.instance().evaluationDate = self.today
         if type=="OIS":
@@ -32,20 +36,14 @@ class Curve:
                 self.sofr_3M_futures = self.get_3M_sofr_strip()
                 self.oisSwaps = self.get_OIS_instruments()
 
-                print("OBFR: ", self.obfr)
-                print("EFFR: ", self.effr)
-                print("1M SOFR Futures Strip: ")
-                print(self.sofr_1M_futures)
-                print("3M SOFR Futures Strip: ")
-                print(self.sofr_3M_futures)
-                print("OIS Swaps: ")
-                print(self.oisSwaps)
+
 
                 self.helpers = self.get_DepositRateHelper()
                 gaps = self.sofr_1M_futures[~self.sofr_1M_futures['End'].isin(self.sofr_3M_futures['End'])]
+
                 self.helpers += self.get_SofrFutureRateHelper(gaps, ql.Monthly)
                 self.helpers += self.get_SofrFutureRateHelper(self.sofr_3M_futures, ql.Quarterly)
-                self.ois_helpers = self.OISRateHelper()
+                self.helpers += self.OISRateHelper()
 
 
 
@@ -56,6 +54,8 @@ class Curve:
         print("Currency is: ", self.currency, "Type is: ", self.type, "Tenor is: ", self.tenor)
         # if self.currency in ["USD", "GBP"]:
         #     print(self.cme_text)
+
+
 
     def get_cme_settlement_data(self):
         driver = webdriver.Chrome()
@@ -81,6 +81,35 @@ class Curve:
         find_table = file.find("percentrate")
 
         return float(find_table.text)
+
+    def get_one_month_futures_dates(self, futures_code):
+        month_dict = {
+            'JAN': 1,
+            'FEB': 2,
+            'MAR': 3,
+            'APR': 4,
+            'MAY': 5,
+            'JUN': 6,
+            'JLY': 7,
+            'AUG': 8,
+            'SEP': 9,
+            'OCT': 10,
+            'NOV': 11,
+            'DEC': 12,
+
+        }
+        year_prefix = str(datetime.now().year)[:2]
+        year = int(year_prefix + futures_code[3:])
+        first_day_of_month = ql.Date(1, month_dict[futures_code[0:3]], year)
+        fbd = self.holiday.adjust(first_day_of_month, ql.Following)
+        first_business_day_of_month = ql_to_datetime(fbd)
+        lbd = self.holiday.endOfMonth(first_day_of_month)
+        last_business_day_of_month = ql_to_datetime(lbd)
+
+        return first_business_day_of_month, last_business_day_of_month
+
+        # return datetime.strftime(first_business_day_of_month, "%m/%d/%Y"), datetime.strftime(last_business_day_of_month, "%m/%d/%Y")
+
 
     def getIMMDate(self, IMMcode, month):
         '''Takes 5 character IMM code (e.g. SEP23) and returns effective date as datetime object'''
@@ -125,7 +154,9 @@ class Curve:
         temp_end += timedelta(days=adj_end)
         temp_end += timedelta(weeks=nth_week - 1)
 
-        return datetime.strftime(temp, "%m/%d/%Y"), datetime.strftime(temp_end, "%m/%d/%Y")
+
+        return temp, temp_end
+        # return datetime.strftime(temp, "%m/%d/%Y"), datetime.strftime(temp_end, "%m/%d/%Y")
 
     def get_30_day_fed_funds_strip(self):
         start = self.cme_text.find("FF 30 DAY FED FUNDS FUTURES") + len("FF 30 DAY FED FUNDS FUTURES") + 1
@@ -148,12 +179,16 @@ class Curve:
 
         start = []
         end = []
+        month = []
+        year = []
         for d in expiry:
-            s, e = self.getIMMDate(d, 1)
+            s, e = self.get_one_month_futures_dates(d)
             start.append(s)
             end.append(e)
+            month.append(s.month)
+            year.append(s.year)
 
-        df2 = pd.DataFrame(list(zip(expiry, start, end)), columns=['Expiry', 'Start', 'End'])
+        df2 = pd.DataFrame(list(zip(expiry, start, end, month, year)), columns=['Expiry', 'Start', 'End', 'Month', 'Year'])
 
         df = df.merge(df2, left_on='Expiry', right_on='Expiry')
 
@@ -180,14 +215,23 @@ class Curve:
 
         start = []
         end = []
+        month = []
+        year = []
         for d in expiry:
-            s, e = self.getIMMDate(d, 1)
+            s, e = self.get_one_month_futures_dates(d)
             start.append(s)
             end.append(e)
+            month.append(s.month)
+            year.append(s.year)
 
-        df2 = pd.DataFrame(list(zip(expiry, start, end)), columns=['Expiry', 'Start', 'End'])
+        df2 = pd.DataFrame(list(zip(expiry, start, end, month, year)), columns=['Expiry', 'Start', 'End', 'Month', 'Year'])
 
         df = df.merge(df2, left_on='Expiry', right_on='Expiry')
+        prior = df[df['Start'] <= pd.Timestamp(self.t0)].index
+        df.drop(prior, inplace=True)
+
+
+
 
         return df
 
@@ -212,14 +256,24 @@ class Curve:
 
         start = []
         end = []
+        month = []
+        year = []
         for d in expiry:
             s, e = self.getIMMDate(d, 3)
+
             start.append(s)
             end.append(e)
+            month.append(s.month)
+            year.append(s.year)
 
-        df2 = pd.DataFrame(list(zip(expiry, start, end)), columns=['Expiry', 'Start', 'End'])
+        df2 = pd.DataFrame(list(zip(expiry, start, end, month, year)), columns=['Expiry', 'Start', 'End', 'Month', 'Year'])
 
         df = df.merge(df2, left_on='Expiry', right_on='Expiry')
+
+        prior = df[df['Start'] <= pd.Timestamp(self.t0)].index
+
+        df.drop(prior, inplace=True)
+
 
         return df
 
@@ -240,8 +294,7 @@ class Curve:
         for i in range(0,8):
             ois_quotes[dfs[DF_INDEX].iloc[i,0] + ' OIS'] = dfs[DF_INDEX].iloc[i,1]
 
-        print("OIS Quotes:")
-        print(ois_quotes)
+
         self.ois_rates = pd.DataFrame(list(ois_quotes.items()), columns=['Tenor', 'Rate'])
         return self.ois_rates
 
@@ -257,13 +310,15 @@ class Curve:
 
     def get_SofrFutureRateHelper(self, gaps, tenor):
         rate_month_year_list = []
+
         for i in range(len(gaps)):
             rate = gaps['Sett'].to_list()[i]
-            month = int(gaps['Start'].to_list()[i][0:2])
-            year = int(gaps['Start'].to_list()[i][6:])
+            month = gaps['Month'].to_list()[i]
+            year = gaps['Year'].to_list()[i]
+
             rate_month_year_list.append((rate, month, year))
 
-        print(rate_month_year_list)
+
         helpers = [
             ql.SofrFutureRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate)), month, year, tenor, ql.Sofr())
             for rate, month, year in rate_month_year_list
@@ -272,10 +327,9 @@ class Curve:
         return helpers
 
     def OISRateHelper(self):
-        print(self.oisSwaps.info())
-        print(self.oisSwaps)
+
         forward6mLevel = self.oisSwaps.loc[self.oisSwaps['Tenor'] == '6 month OIS', 'Rate'].values[0]/100
-        print(forward6mLevel)
+
         forward6mQuote = ql.QuoteHandle(ql.SimpleQuote(forward6mLevel))
         yts6m = ql.FlatForward(0, ql.TARGET(), forward6mQuote, ql.Actual365Fixed())
         yts6mh = ql.YieldTermStructureHandle(yts6m)
@@ -320,9 +374,9 @@ class Curve:
 
     def build_from_ois(self):
         spot_curve = ql.PiecewiseLogCubicDiscount(self.today,
-                             self.ois_helpers,
+                             self.helpers,
                              self.day_count)
-        df_curve = ql.PiecewiseFlatForward(self.today, self.ois_helpers,
+        df_curve = ql.PiecewiseFlatForward(self.today, self.helpers,
                                             ql.Actual360())
 
         spots = []
@@ -364,4 +418,6 @@ d = Curve("EUR", "LIBOR",)
 print(a.contents(), b.contents(), c.contents(), d.contents())
 a.OISRateHelper()
 a.build_from_ois()
+
+a.build_spot_curve()
 
