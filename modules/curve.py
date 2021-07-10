@@ -55,6 +55,7 @@ class Curve:
                     print(self.eurodollar_futures)
                     print(self.swaps)
                     self.forecast_helpers = self.get_libor_depo_helper()
+                    self.forecast_helpers += self.FuturesRateHelper()
                     self.forecast_helpers += self.SwapRateHelper()
                     self.forecast_curve = ql.PiecewiseLogCubicDiscount(2, self.holiday, self.forecast_helpers,
                                                self.day_count)
@@ -453,6 +454,39 @@ class Curve:
 
             ]
         ]
+
+        return helpers
+
+    def FuturesRateHelper(self):
+        df = self.eurodollar_futures[['Sett', 'Start']]
+        helpers = [
+            ql.FuturesRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate)),
+                                 ql.Date(start_date.day, start_date.month, start_date.year), self.libor, ql.QuoteHandle())
+
+            for rate, start_date in [
+                (df.iloc[0, 0], df.iloc[0, 1]),
+                (df.iloc[1, 0], df.iloc[1, 1]),
+                (df.iloc[2, 0], df.iloc[2, 1]),
+                (df.iloc[3, 0], df.iloc[3, 1]),
+                (df.iloc[4, 0], df.iloc[4, 1]),
+                (df.iloc[5, 0], df.iloc[5, 1]),
+                (df.iloc[6, 0], df.iloc[6, 1]),
+                (df.iloc[7, 0], df.iloc[7, 1]),
+                (df.iloc[8, 0], df.iloc[8, 1]),
+                (df.iloc[9, 0], df.iloc[9, 1]),
+                (df.iloc[10, 0], df.iloc[10, 1]),
+                (df.iloc[11, 0], df.iloc[11, 1]),
+                (df.iloc[12, 0], df.iloc[12, 1]),
+                (df.iloc[13, 0], df.iloc[13, 1]),
+                (df.iloc[14, 0], df.iloc[14, 1]),
+                (df.iloc[15, 0], df.iloc[15, 1]),
+                (df.iloc[16, 0], df.iloc[16, 1]),
+                (df.iloc[17, 0], df.iloc[17, 1]),
+            ]
+        ]
+        # for index, row in self.eurodollar_futures.iterrows():
+        #     print(index)
+        #     print(row[['Start', 'Sett']])
 
         return helpers
 
