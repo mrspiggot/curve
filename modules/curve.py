@@ -40,14 +40,25 @@ class Curve:
                 self.helpers += self.get_SofrFutureRateHelper(self.sofr_1M_futures, ql.Monthly)
                 self.helpers += self.get_SofrFutureRateHelper(self.sofr_3M_futures, ql.Quarterly)
                 self.helpers += self.OISRateHelper()
+                self.ois_curve = ql.PiecewiseSplineCubicDiscount(self.holiday.adjust(self.today, ql.Following),
+                             self.helpers, self.day_count)
+                self.ois_curve.enableExtrapolation()
                 if self.tenor in ['1M', '3M', '6M']:
+                    self.libor = ql.USDLibor(ql.Period(self.tenor))
                     url = "https://www.global-rates.com/en/interest-rates/libor/american-dollar/american-dollar.aspx"
                     self.depo_quotes = {}
                     self.depo = self.get_depo_instruments(url)
                     self.eurodollar_futures = self.get_eurodollar_strip()
                     self.swaps = self.get_Swap_instruments()
+                    self.discount_curve = ql.RelinkableYieldTermStructureHandle()
+                    self.discount_curve.linkTo(self.ois_curve)
                     print(self.eurodollar_futures)
                     print(self.swaps)
+                    self.forecast_helpers = self.get_libor_depo_helper()
+                    self.forecast_helpers += self.SwapRateHelper()
+                    self.forecast_curve = ql.PiecewiseLogCubicDiscount(2, self.holiday, self.forecast_helpers,
+                                               self.day_count)
+                    self.forecast_curve.enableExtrapolation()
 
 
 
@@ -398,19 +409,17 @@ class Curve:
         month6 = self.get_depo_business_day_months(t0, 6)
         month12 = self.get_depo_business_day_months(t0, 12)
 
-        self.depo_quotes['O/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), today, tom]
-        self.depo_quotes['T/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), tom, tom_next]
-        self.depo_quotes['S/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), tom_next, spot]
-        self.depo_quotes['1 wk depo'] = [float(dfs[9].iloc[2,1].strip('\xa0%')), tom_next, week1]
-        self.depo_quotes['1 Mth depo'] = [float(dfs[9].iloc[4, 1].strip('\xa0%')), tom_next, month1]
-        self.depo_quotes['2 Mth depo'] = [float(dfs[9].iloc[5, 1].strip('\xa0%')), tom_next, month2]
-        self.depo_quotes['3 Mth depo'] = [float(dfs[9].iloc[6, 1].strip('\xa0%')), tom_next, month3]
-        self.depo_quotes['6 Mth depo'] = [float(dfs[9].iloc[9, 1].strip('\xa0%')), tom_next, month6]
-        self.depo_quotes['12 Mth depo'] = [float(dfs[9].iloc[15, 1].strip('\xa0%')), tom_next, month12]
+        self.depo_quotes['O/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), today, tom, 1, 0]
+        self.depo_quotes['T/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), tom, tom_next, 1, 1]
+        self.depo_quotes['S/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), tom_next, spot, 1, 2]
+        self.depo_quotes['1 wk depo'] = [float(dfs[9].iloc[2,1].strip('\xa0%')), tom_next, week1, 7, 2]
+        self.depo_quotes['1 Mth depo'] = [float(dfs[9].iloc[4, 1].strip('\xa0%')), tom_next, month1, 1, 2]
+        self.depo_quotes['2 Mth depo'] = [float(dfs[9].iloc[5, 1].strip('\xa0%')), tom_next, month2, 2, 2]
+        self.depo_quotes['3 Mth depo'] = [float(dfs[9].iloc[6, 1].strip('\xa0%')), tom_next, month3, 3, 2]
+        self.depo_quotes['6 Mth depo'] = [float(dfs[9].iloc[9, 1].strip('\xa0%')), tom_next, month6, 6, 2]
+        self.depo_quotes['12 Mth depo'] = [float(dfs[9].iloc[15, 1].strip('\xa0%')), tom_next, month12, 12, 2]
 
-        df = pd.DataFrame.from_dict(self.depo_quotes, orient='index', columns = ['Rate', 'Start', 'End'])
-        print(df)
-        print(df.info())
+        df = pd.DataFrame.from_dict(self.depo_quotes, orient='index', columns = ['Rate', 'Start', 'End', 'Period', 'Fixing Days'])
         return df
 
     def get_DepositRateHelper(self, depo):
@@ -421,6 +430,30 @@ class Curve:
                                  False, ql.Actual360())
             for rate, fixingDays in [(depo, 0), (depo, 1), (depo, 2)]
         ]
+        return helpers
+    def get_libor_depo_helper(self):
+        helpers = [
+            ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Period(period, ql.Days), fixing, self.holiday, ql.Following, False, self.day_count)
+            for rate, period, fixing in [
+                (self.depo.iloc[0, 0], 1, 0),
+                (self.depo.iloc[1, 0], 1, 1),
+                (self.depo.iloc[2, 0], 1, 2),
+                (self.depo.iloc[3, 0], 7, 2)
+
+            ]
+        ]
+        helpers += [
+            ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Period(period, ql.Months), fixing, self.holiday, ql.Following, False, self.day_count)
+            for rate, period, fixing in [
+                (self.depo.iloc[4, 0], 1, 2),
+                (self.depo.iloc[5, 0], 2, 2),
+                (self.depo.iloc[6, 0], 3, 2),
+                (self.depo.iloc[7, 0], 6, 2),
+                (self.depo.iloc[7, 0], 12, 2)
+
+            ]
+        ]
+
         return helpers
 
     def get_SofrFutureRateHelper(self, gaps, tenor):
@@ -463,6 +496,30 @@ class Curve:
         ]
         return oishelper
 
+    def SwapRateHelper(self):
+        helpers = [
+            # ql.SwapRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)),
+            #                   ql.Period(tenor, ql.Years), self.holiday,
+            #                   ql.Semiannual, ql.Unadjusted, ql.Thirty360(ql.Thirty360.BondBasis), self.libor, ql.QuoteHandle(),
+            #                   ql.Period(0, ql.Days), self.discount_curve)
+            ql.SwapRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate / 100)),
+                              ql.Period(tenor, ql.Years), self.holiday,
+                              ql.Semiannual, ql.Unadjusted,
+                              self.day_count,
+                              self.libor, ql.QuoteHandle(), ql.Period(0, ql.Days),
+                              self.discount_curve)
+            for rate, tenor in [
+                (self.swaps.iloc[0, 1], 2),
+                (self.swaps.iloc[1, 1], 3),
+                (self.swaps.iloc[2, 1], 5),
+                (self.swaps.iloc[3, 1], 10),
+                (self.swaps.iloc[4, 1], 30)
+
+
+            ]
+        ]
+
+        return helpers
 
     def build_spot_curve(self):
         spot_curve = ql.PiecewiseSplineCubicDiscount(self.holiday.adjust(self.today, ql.Following),
