@@ -35,15 +35,19 @@ class Curve:
                 self.sofr_1M_futures = self.get_1M_sofr_strip()
                 self.sofr_3M_futures = self.get_3M_sofr_strip()
                 self.oisSwaps = self.get_OIS_instruments()
-
-
-
-                self.helpers = self.get_DepositRateHelper()
-                gaps = self.sofr_1M_futures[~self.sofr_1M_futures['End'].isin(self.sofr_3M_futures['End'])]
-
-                self.helpers += self.get_SofrFutureRateHelper(gaps, ql.Monthly)
+                self.helpers = self.get_DepositRateHelper(self.obfr)
+                # gaps = self.sofr_1M_futures[~self.sofr_1M_futures['End'].isin(self.sofr_3M_futures['End'])]
+                self.helpers += self.get_SofrFutureRateHelper(self.sofr_1M_futures, ql.Monthly)
                 self.helpers += self.get_SofrFutureRateHelper(self.sofr_3M_futures, ql.Quarterly)
                 self.helpers += self.OISRateHelper()
+                if self.tenor in ['1M', '3M', '6M']:
+                    url = "https://www.global-rates.com/en/interest-rates/libor/american-dollar/american-dollar.aspx"
+                    self.depo_quotes = {}
+                    self.depo = self.get_depo_instruments(url)
+                    self.eurodollar_futures = self.get_eurodollar_strip()
+                    self.swaps = self.get_Swap_instruments()
+                    print(self.eurodollar_futures)
+                    print(self.swaps)
 
 
 
@@ -273,8 +277,44 @@ class Curve:
         prior = df[df['Start'] <= pd.Timestamp(self.t0)].index
 
         df.drop(prior, inplace=True)
+        return df
+
+    def get_eurodollar_strip(self):
 
 
+        start = self.cme_text.find("ED CME EURODOLLAR FUTURES") + len("ED CME EURODOLLAR FUTURES") + 1
+        end = self.cme_text.find("EM 1-MONTH EURODOLLAR FUTURE")
+
+        edf = self.cme_text[start:end]
+        end = edf.find("TOTAL")
+        edf = edf[:end]
+        data = edf.splitlines()
+
+        df = pd.DataFrame([x[:56].split() for x in data])
+        df.columns = ['Expiry', 'Open', 'High', 'Low', 'Last', 'Sett']
+        df.set_index('Expiry', inplace=True)
+        df = df.head(28)
+
+
+        df = df.apply(pd.to_numeric, errors='ignore')
+        expiry = df.index.tolist()
+
+        start = []
+        end = []
+        month = []
+        year = []
+        for d in expiry:
+            s, e = self.getIMMDate(d, 3)
+
+            start.append(s)
+            end.append(e)
+            month.append(s.month)
+            year.append(s.year)
+
+        df2 = pd.DataFrame(list(zip(expiry, start, end, month, year)), columns=['Expiry', 'Start', 'End', 'Month', 'Year'])
+        df = df.merge(df2, left_on='Expiry', right_on='Expiry')
+        prior = df[df['Start'] <= pd.Timestamp(self.t0)].index
+        df.drop(prior, inplace=True)
         return df
 
     def get_OIS_instruments(self):
@@ -298,13 +338,88 @@ class Curve:
         self.ois_rates = pd.DataFrame(list(ois_quotes.items()), columns=['Tenor', 'Rate'])
         return self.ois_rates
 
-    def get_DepositRateHelper(self):
+    def get_Swap_instruments(self):
+        if self.currency == "USD":
+            DF_INDEX = 0
+        elif self.currency == "EUR":
+            DF_INDEX = 2
+        elif self.currency == "GBP":
+            DF_INDEX = 6
+
+        if self.tenor == "1M":
+            COL_INDEX = 1
+        elif self.tenor == "3M":
+            COL_INDEX = 2
+        elif self.tenor == "6M":
+            COL_INDEX = 3
+
+        else:
+            print("Currency not supported")
+            return -1
+
+        dfs = pd.read_html("https://www.lch.com/services/swapclear/essentials/settlement-prices")
+        swap_quotes = {}
+        for i in range(0,5):
+            swap_quotes[dfs[DF_INDEX].iloc[i,0] + ' ' + self.tenor + ' Libor'] = dfs[DF_INDEX].iloc[i,COL_INDEX]
+
+        self.swap_rates = pd.DataFrame(list(swap_quotes.items()), columns=['Tenor', 'Rate'])
+        return self.swap_rates
+
+    def get_depo_business_day(self, start, n):
+
+        date = start + timedelta(days=n)
+        ql_date = ql.Date(date.day, date.month, date.year)
+        ql_rolled = self.holiday.adjust(ql_date, ql.Following)
+        ret_date = ql_to_datetime(ql_rolled)
+
+        return ret_date
+
+    def get_depo_business_day_months(self, start, n):
+
+        date = start
+        ql_date = ql.Date(date.day, (date.month + n) % 12,  date.year)
+        ql_rolled = self.holiday.adjust(ql_date, ql.ModifiedFollowing)
+        ret_date = ql_to_datetime(ql_rolled)
+
+        return ret_date
+
+    def get_depo_instruments(self, url):
+        dfs = pd.read_html(url)
+        t0 = ql_to_datetime(self.holiday.adjust(ql.Date(self.t0.day, self.t0.month, self.t0.year), ql.Following))
+
+        today = self.get_depo_business_day(t0, 0)
+        tom = self.get_depo_business_day(t0, 1)
+        tom_next = self.get_depo_business_day(t0, 2)
+        spot = self.get_depo_business_day(t0, 3)
+        week1 = self.get_depo_business_day(t0, 9)
+        month1 = self.get_depo_business_day_months(t0, 1)
+        month2 = self.get_depo_business_day_months(t0, 2)
+        month3 = self.get_depo_business_day_months(t0, 3)
+        month6 = self.get_depo_business_day_months(t0, 6)
+        month12 = self.get_depo_business_day_months(t0, 12)
+
+        self.depo_quotes['O/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), today, tom]
+        self.depo_quotes['T/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), tom, tom_next]
+        self.depo_quotes['S/N depo'] = [float(dfs[9].iloc[1,1].strip('\xa0%')), tom_next, spot]
+        self.depo_quotes['1 wk depo'] = [float(dfs[9].iloc[2,1].strip('\xa0%')), tom_next, week1]
+        self.depo_quotes['1 Mth depo'] = [float(dfs[9].iloc[4, 1].strip('\xa0%')), tom_next, month1]
+        self.depo_quotes['2 Mth depo'] = [float(dfs[9].iloc[5, 1].strip('\xa0%')), tom_next, month2]
+        self.depo_quotes['3 Mth depo'] = [float(dfs[9].iloc[6, 1].strip('\xa0%')), tom_next, month3]
+        self.depo_quotes['6 Mth depo'] = [float(dfs[9].iloc[9, 1].strip('\xa0%')), tom_next, month6]
+        self.depo_quotes['12 Mth depo'] = [float(dfs[9].iloc[15, 1].strip('\xa0%')), tom_next, month12]
+
+        df = pd.DataFrame.from_dict(self.depo_quotes, orient='index', columns = ['Rate', 'Start', 'End'])
+        print(df)
+        print(df.info())
+        return df
+
+    def get_DepositRateHelper(self, depo):
         helpers = [
             ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate / 100)),
                                  ql.Period(1, ql.Days), fixingDays,
                                  self.holiday, ql.Following,
                                  False, ql.Actual360())
-            for rate, fixingDays in [(self.obfr, 0), (self.obfr, 1), (self.obfr, 2)]
+            for rate, fixingDays in [(depo, 0), (depo, 1), (depo, 2)]
         ]
         return helpers
 
@@ -336,8 +451,8 @@ class Curve:
         oishelper = [ql.OISRateHelper(2, ql.Period(*tenor), ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.FedFunds(yts6mh), yts6mh,
                                      True)
             for rate, tenor in [
-                         (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '3 month OIS', 'Rate'].values[0], (3, ql.Months)),
-                         (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '6 month OIS', 'Rate'].values[0], (6, ql.Months)),
+                         # (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '3 month OIS', 'Rate'].values[0], (3, ql.Months)),
+                         # (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '6 month OIS', 'Rate'].values[0], (6, ql.Months)),
                          (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '1 year OIS', 'Rate'].values[0], (12, ql.Months)),
                          (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '2 year OIS', 'Rate'].values[0], (2, ql.Years)),
                          (self.oisSwaps.loc[self.oisSwaps['Tenor'] == '3 year OIS', 'Rate'].values[0], (3, ql.Years)),
@@ -348,18 +463,23 @@ class Curve:
         ]
         return oishelper
 
+
     def build_spot_curve(self):
-        spot_curve = ql.PiecewiseLogCubicDiscount(self.today,
+        spot_curve = ql.PiecewiseSplineCubicDiscount(self.holiday.adjust(self.today, ql.Following),
                              self.helpers,
                              self.day_count)
 
+        spot_curve.enableExtrapolation()
+
         spots = []
+        discount_factors = []
         tenors = []
         for d in spot_curve.dates():
             yrs = self.day_count.yearFraction(self.today, d)
             compounding = ql.Compounded
             freq = ql.Semiannual
             zero_rate = spot_curve.zeroRate(yrs, compounding, freq)
+            discount_fs = spot_curve.discount(d)
             tenors.append(yrs)
             eq_rate = zero_rate.equivalentRate(self.day_count,
                                                compounding,
@@ -367,10 +487,17 @@ class Curve:
                                                self.today,
                                                d).rate()
             spots.append(100 * eq_rate)
+            discount_factors.append(discount_fs)
 
-        chart = dict(zip(tenors, spots))
 
-        print(chart)
+        datec = spot_curve.dates()
+        curve_dates = []
+        for c in datec:
+            curve_dates.append(ql_to_datetime(c))
+
+        chart = pd.DataFrame(list(zip(tenors, curve_dates, spots, discount_factors)), columns=['YearFrac', 'Date', 'Zero', 'Discount Factor'])
+
+        return chart
 
     def build_from_ois(self):
         spot_curve = ql.PiecewiseLogCubicDiscount(self.today,
@@ -416,8 +543,12 @@ c = Curve("EUR", "LIBOR", "3M")
 d = Curve("EUR", "LIBOR",)
 
 print(a.contents(), b.contents(), c.contents(), d.contents())
-a.OISRateHelper()
-a.build_from_ois()
+# a.OISRateHelper()
+# a.build_from_ois()
 
-a.build_spot_curve()
+chart = a.build_spot_curve()
+print(chart)
+print(chart.info())
+
+e = Curve("USD", "LIBOR", "3M")
 
