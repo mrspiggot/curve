@@ -434,25 +434,25 @@ class Curve:
         return helpers
     def get_libor_depo_helper(self):
         helpers = [
-            ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Period(period, ql.Days), fixing, self.holiday, ql.Following, False, self.day_count)
-            for rate, period, fixing in [
-                (self.depo.iloc[0, 0], 1, 0),
-                (self.depo.iloc[1, 0], 1, 1),
-                (self.depo.iloc[2, 0], 1, 2),
-                (self.depo.iloc[3, 0], 7, 2)
-
-            ]
+            ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Period(int(period), ql.Days), int(fixing), self.holiday, ql.Following, False, self.day_count)
+            # for rate, period, fixing in [
+            #     (self.depo.iloc[0, 0], 1, 0),
+            #     (self.depo.iloc[1, 0], 1, 1),
+            #     (self.depo.iloc[2, 0], 1, 2),
+            #     (self.depo.iloc[3, 0], 7, 2)
+            #
+            # ]
+            for rate, period, fixing in self.depo[['Rate', 'Period', 'Fixing Days']].values
         ]
         helpers += [
-            ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Period(period, ql.Months), fixing, self.holiday, ql.Following, False, self.day_count)
-            for rate, period, fixing in [
-                (self.depo.iloc[4, 0], 1, 2),
-                (self.depo.iloc[5, 0], 2, 2),
-                (self.depo.iloc[6, 0], 3, 2),
-                (self.depo.iloc[7, 0], 6, 2),
-                (self.depo.iloc[7, 0], 12, 2)
-
-            ]
+            ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Period(int(period), ql.Months), int(fixing), self.holiday, ql.Following, False, self.day_count)
+            # for rate, period, fixing in [
+            #     (self.depo.iloc[4, 0], 1, 2),
+            #     (self.depo.iloc[5, 0], 2, 2),
+            #     (self.depo.iloc[6, 0], 3, 2),
+            #     (self.depo.iloc[7, 0], 6, 2),
+            #     (self.depo.iloc[7, 0], 12, 2) ]
+            for rate, period, fixing in self.depo[['Rate', 'Period', 'Fixing Days']].values
         ]
 
         return helpers
@@ -587,7 +587,7 @@ class Curve:
             curve_dates.append(ql_to_datetime(c))
 
         chart = pd.DataFrame(list(zip(tenors, curve_dates, spots, discount_factors)), columns=['YearFrac', 'Date', 'Zero', 'Discount Factor'])
-
+        print(chart)
         return chart
 
     def build_from_ois(self):
@@ -628,18 +628,19 @@ class Curve:
         return
 
 
-a = Curve()
-b = Curve("GBP")
-c = Curve("EUR", "LIBOR", "3M")
-d = Curve("EUR", "LIBOR",)
-
-print(a.contents(), b.contents(), c.contents(), d.contents())
+# a = Curve()
+# b = Curve("GBP")
+# c = Curve("EUR", "LIBOR", "3M")
+# d = Curve("EUR", "LIBOR",)
+#
+# print(a.contents(), b.contents(), c.contents(), d.contents())
 # a.OISRateHelper()
 # a.build_from_ois()
 
-chart = a.build_spot_curve()
-print(chart)
-print(chart.info())
+# chart = a.build_spot_curve()
+# print(chart)
+# print(chart.info())
 
-e = Curve("USD", "LIBOR", "3M")
+e = Curve("USD", "LIBOR", "6M")
+e.build_spot_curve()
 
