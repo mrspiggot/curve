@@ -13,6 +13,33 @@ from plotly.subplots import make_subplots
 
 WIDTH = "14%"
 
+def curve_table():
+
+    return table
+
+def get_holiday(hol):
+
+    if hol == "TARGET":
+        cal = ql.TARGET()
+    elif hol == "US Libor Impact":
+        cal = ql.UnitedStates(ql.UnitedStates.LiborImpact)
+    elif hol == "US Fed":
+        cal = ql.UnitedStates(ql.UnitedStates.FederalReserve)
+    elif hol == "US Govt Bond":
+        cal = ql.UnitedStates(ql.UnitedStates.GovernmentBond)
+    elif hol == "US Settlement":
+        cal = ql.UnitedStates(ql.UnitedStates.Settlement)
+    elif hol == "FrankFurt Settlement":
+        cal = ql.Germany(ql.Germany.Settlement)
+    elif hol == "Eurex":
+        cal = ql.Germany(ql.Germany.Eurex)
+    elif hol == "UK Exchange":
+        cal = ql.UnitedKingdom(ql.UnitedKingdom.Exchange)
+    else:
+        cal = ql.UnitedKingdom(ql.UnitedKingdom.Settlement)
+
+    return cal
+
 currency = dcc.Dropdown(
     id="currency-dd",
     options=[
@@ -58,7 +85,6 @@ calendar = dcc.Dropdown(
         {'label': 'UK settlement Month', 'value': 'UK Settlement'},
     ],
     placeholder="Select Calendar(s)",
-    multi=True,
     value='US Libor Impact'
 )
 display = dcc.Dropdown(
@@ -95,11 +121,14 @@ layout = html.Div([
         ]
     ),
     dcc.Loading(
-        dcc.Graph(id='curve'), fullscreen=True, type='graph'
+        dcc.Graph(id='curve'), fullscreen=True, type='graph',
     ),
+    html.Div(id='curve-table'),
+    #dbc.Table(id='curve-table')
 ])
 
-@app.callback(Output('curve', 'figure'),
+@app.callback([Output('curve', 'figure'),
+               Output('curve-table', 'children')],
               [Input('build-btn', 'n_clicks'),
                Input('currency-dd', 'value'),
                Input('type-dd', 'value'),
@@ -109,6 +138,13 @@ layout = html.Div([
 def display_curve(click, currency, type, tenor, holidays):
     print('clicks =', click)
     crv = Curve(currency, type, tenor)
+
+
+    crv.currency = currency
+    crv.type = type
+    crv.tenor = tenor
+    crv.holiday = get_holiday(holidays)
+
     df = crv.build_spot_curve()
     print(df)
     print(df.info())
@@ -136,5 +172,20 @@ def display_curve(click, currency, type, tenor, holidays):
         title_text="<b>secondary</b> Discount Factors",
         secondary_y=True)
 
+    table_header =[
+        html.Thead(html.Tr([html.Th("Date"), html.Th("Year Fraction"), html.Th("Zero Rate"), html.Th("Discount Factor")]))
+    ]
+    table_row = []
+    df[['YearFrac', 'Zero', 'Discount Factor']] = df[['YearFrac', 'Zero', 'Discount Factor']].round(6)
+    for k, v in df.iterrows():
+        row = html.Tr(
+            [
+                html.Td(v['Date'].strftime('%a, %d %b %Y')), html.Td(v['YearFrac']), html.Td(v['Zero']), html.Td(v['Discount Factor'])
+            ])
+        table_row.append(row)
 
-    return fig
+    table_body = [html.Tbody(table_row)]
+
+    ctable = dbc.Table(table_header+table_body, striped=True, bordered=True, hover=True, size="sm",
+                      style={'font_family': 'cursive', 'font_size': '12px'})
+    return fig, ctable
