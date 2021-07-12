@@ -5,6 +5,7 @@ import bs4 as bs
 import lxml
 import requests
 import QuantLib as ql
+from selenium.webdriver.chrome.options import Options
 
 
 def ql_to_datetime(d):
@@ -74,7 +75,10 @@ class Curve:
 
 
     def get_cme_settlement_data(self):
-        driver = webdriver.Chrome()
+        options = Options()
+        options.add_argument("--window-size=1,1")
+
+        driver = webdriver.Chrome(options=options)
         driver.get('http://www.cmegroup.com/ftp/pub/settle/stlint')
 
         self.cme_text = driver.page_source
