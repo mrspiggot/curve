@@ -61,6 +61,7 @@ class Curve:
                     self.forecast_curve = ql.PiecewiseLogCubicDiscount(2, self.holiday, self.forecast_helpers,
                                                self.day_count)
                     self.forecast_curve.enableExtrapolation()
+            else:
 
 
 
